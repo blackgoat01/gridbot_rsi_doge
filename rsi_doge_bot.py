@@ -10,10 +10,7 @@ import json
 SYMBOL = "DOGEUSDT"
 COIN = "DOGE"
 USDT_EINSATZ = 10
-RSI_KAUF = 30
-RSI_VERKAUF = 70
-RSI_INTERVAL = "15"
-CHECK_INTERVAL = 15 * 60
+CHECK_INTERVAL = 60  # 1 Minute
 
 BASE_URL = "https://api.bybit.com"
 
@@ -38,25 +35,6 @@ def send_telegram(text):
         )
     except Exception as e:
         print("Telegram Fehler:", e)
-
-# === RSI Berechnen ===
-def get_rsi():
-    try:
-        url = f"{BASE_URL}/v5/market/kline"
-        params = {"category": "spot", "symbol": SYMBOL, "interval": RSI_INTERVAL, "limit": 100}
-        r = requests.get(url, params=params)
-        closes = [float(x[4]) for x in r.json()["result"]["list"]]
-        deltas = [closes[i+1] - closes[i] for i in range(len(closes)-1)]
-        gains = [d for d in deltas if d > 0]
-        losses = [-d for d in deltas if d < 0]
-        avg_gain = sum(gains)/14 if gains else 0.01
-        avg_loss = sum(losses)/14 if losses else 0.01
-        rs = avg_gain / avg_loss
-        rsi = round(100 - (100 / (1 + rs)), 2)
-        return rsi
-    except Exception as e:
-        send_telegram(f"⚠️ RSI Fehler: {str(e)}")
-        return None
 
 # === Preis abfragen ===
 def get_price():
@@ -108,38 +86,31 @@ def place_order(side, qty, price):
     r = requests.post(url, headers=headers, data=json.dumps(body))
     send_telegram(f"📨 {side}-Order ➜ {qty} @ {price} USDT\nAntwort: {r.text}")
 
-# === MAIN LOOP ===
+# === MAIN LOOP (Einmaliger Testlauf) ===
 def run():
     global has_open_position
-    send_telegram("🤖 RSI Auto-Bot gestartet für DOGEUSDT")
-    while True:
-        try:
-            rsi = get_rsi()
-            price = get_price()
-            if not rsi or not price:
-                time.sleep(CHECK_INTERVAL)
-                continue
+    send_telegram("🤖 TEST-Bot gestartet – sofortiger KAUF & VERKAUF wird getestet")
 
-            send_telegram(f"📊 RSI: {rsi} | Preis: {price} USDT")
+    price = get_price()
+    usdt = get_balance("USDT")
+    doge = get_balance("DOGE")
 
-            usdt = get_balance("USDT")
-            doge = get_balance("DOGE")
+    if usdt >= USDT_EINSATZ and not has_open_position:
+        qty = round(USDT_EINSATZ / price, 2)
+        place_order("Buy", qty, round(price, 4))
+        has_open_position = True
+        send_telegram("✅ Test-KAUF ausgelöst")
 
-            if rsi < RSI_KAUF and usdt >= USDT_EINSATZ and not has_open_position:
-                qty = round(USDT_EINSATZ / price, 2)
-                place_order("Buy", qty, round(price, 4))
-                has_open_position = True
-                send_telegram("✅ Kauf ausgelöst – warte auf Verkaufsbedingungen...")
+    time.sleep(10)
 
-            elif rsi > RSI_VERKAUF and doge >= 5 and has_open_position:
-                place_order("Sell", round(doge, 2), round(price, 4))
-                has_open_position = False
-                send_telegram("✅ Verkauf ausgelöst – warte auf neues Kaufsignal...")
-            else:
-                send_telegram("⏳ Keine Aktion – Bedingungen nicht erfüllt.")
-        except Exception as e:
-            send_telegram(f"❌ Laufzeitfehler: {str(e)}")
-        time.sleep(CHECK_INTERVAL)
+    doge = get_balance("DOGE")
+    price = get_price()
+
+    if doge >= 5 and has_open_position:
+        place_order("Sell", round(doge, 2), round(price, 4))
+        send_telegram("✅ Test-VERKAUF ausgelöst")
+    else:
+        send_telegram("⚠️ Nicht genug DOGE für Test-Verkauf")
 
 if __name__ == "__main__":
     run()
